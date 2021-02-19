@@ -1,0 +1,42 @@
+name: hadoop
+levels:
+  - default
+  - info
+  - error
+  - warn
+  - fatal
+compress_state: false
+snapshot_duration: 600s
+
+max_depth: 4
+similarity_threshold: 0.4
+max_children: 100
+
+masking: '[
+              {"regex_pattern":"\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}(:\\d{1,5})?", "mask_with": "<IP>" },
+              { "regex_pattern": "[\\-\\+]?\\d+", "mask_with": "<NUM>" }
+            ]'
+
+kafka:
+  hosts:
+    - 192.168.1.101:9092
+  input_topic: hadoop_log_input
+  output_topic: hadoop_log_output
+  read_min_bytes: 10e3 # 10kb
+  read_max_bytes: 10e6 # 10mb
+  commit_interval: 5s  # flushes commits to Kafka every 5 second
+  write_batch_size: 100e3 # 100kb
+  write_batch_bytes: 10e6 #10mb
+  write_batch_timeout: 1s # 实际使用batch timeout控制
+
+mysql:
+  path: '127.0.0.1:3306'
+  config: 'charset=utf8mb4&parseTime=True&loc=Local'
+  db-name: 'log_analysis_management'
+  username: 'root'
+  password: 'k!2a7Lrn3'
+  table-name: 'hadoop_log_templates'
+
+save_result_duration: 1s
+#extra_delimiters:
+
