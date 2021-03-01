@@ -2,7 +2,6 @@ package drain
 
 import (
 	"github.com/OneOfOne/xxhash"
-	//"github.com/cespare/xxhash/v2"
 	"strconv"
 	"strings"
 	"unicode"
@@ -11,7 +10,6 @@ import (
 // 使用paramStr，代替日志中被识别出的参数
 const paramStr = "<*>"
 
-// 日志集群
 type LogCluster struct {
 	Tokens []string
 	ID     uint32
@@ -27,7 +25,7 @@ func newLogCluster(tokens []string) *LogCluster {
 	// 使用xxhash，计算tokens生成ID
 	hash := xxhash.New32()
 	for _, token := range tokens {
-		hash.WriteString(token)
+		_, _ = hash.WriteString(token)
 	}
 	c.ID = hash.Sum32()
 	return c

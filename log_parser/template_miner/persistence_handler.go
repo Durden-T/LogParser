@@ -27,9 +27,6 @@ func (h *FilePersistenceHandler) LoadState() ([]byte, error) {
 }
 
 func NewFilePersistenceHandler(cfg *viper.Viper) (PersistenceHandler, error) {
-	filePath := cfg.GetString("persistenceFilePath")
-	if filePath == "" {
-		filePath = "save.txt"
-	}
+	filePath := cfg.GetString("persistence_file_path")
 	return &FilePersistenceHandler{FilePath: filePath}, nil
 }

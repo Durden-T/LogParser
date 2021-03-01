@@ -1,17 +1,19 @@
-name: hadoop
-levels:
+name: hadoopaaaSAaahaaqaaaaaaaaaa
+levels: # 输入日志的级别范围
   - default
   - info
   - error
   - warn
   - fatal
-compress_state: false
-snapshot_duration: 600s
+compress_state: false # 压缩保存state
+snapshot_duration: 600s # 保存state的间隔
+persistence_file_path: save.txt # 持久化文件名
 
-max_depth: 4
-similarity_threshold: 0.4
-max_children: 100
+max_depth: 4 #解析树最大深度
+similarity_threshold: 0.4 # 相似度阈值
+max_children: 100 # 叶节点孩子数的最大数量
 
+# 掩码，替换输入日志中的某种模式
 masking: '[
               {"regex_pattern":"\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}(:\\d{1,5})?", "mask_with": "<IP>" },
               { "regex_pattern": "[\\-\\+]?\\d+", "mask_with": "<NUM>" }
@@ -19,7 +21,7 @@ masking: '[
 
 kafka:
   hosts:
-    - 192.168.1.101:9092
+    - 192.168.1.109:9092
   input_topic: hadoop_log_input
   output_topic: hadoop_log_output
   read_min_bytes: 10e3 # 10kb
@@ -37,6 +39,5 @@ mysql:
   password: 'k!2a7Lrn3'
   table-name: 'hadoop_log_templates'
 
-save_result_duration: 1s
-#extra_delimiters:
+save_result_duration: 50ms # 保存结果的duration
 

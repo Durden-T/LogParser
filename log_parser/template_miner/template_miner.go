@@ -22,7 +22,7 @@ const defaultLevel = "default" // 默认路由到default级别
 type TemplateMiner struct {
 	// 按日志级别路由
 	levelDrains map[string]*drain.Drain
-	masker      *RegexMasker
+	masker      *RegexMasker // 预处理输入数据
 
 	compressState      bool          // 持久化时是否启用压缩
 	snapshotDuration   time.Duration // 持久化间隔
@@ -40,6 +40,7 @@ func New(config *viper.Viper, persistenceHandlerFun PersistenceHandlerFun) (*Tem
 	if err != nil {
 		return nil, errors.WithMessage(err, "reload template miner config failed")
 	}
+	// 模拟析构函数
 	runtime.SetFinalizer(templateMiner, templateMinerDestructor)
 
 	return templateMiner, nil

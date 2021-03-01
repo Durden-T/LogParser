@@ -23,7 +23,7 @@ import (
 	"time"
 )
 
-// const
+// const 默认持久化函数
 var defaultPersistenceHandlerFun = template_miner.NewFilePersistenceHandler
 
 type logTemplate struct {
@@ -33,10 +33,10 @@ type logTemplate struct {
 
 	App    string `gorm:"<-:create;not_null"`
 	Tokens string `gorm:"not_null"`
-	Size   int64  `gorm:"not_null"`
+	Size   int64  `gorm:"not_null"` // 属于该模板的日志数量
 
-	Level   string `gorm:"<-:create;not_null"`
-	Content string `gorm:"not_null"`
+	Level   string `gorm:"<-:create;not_null"` // 日志级别
+	Content string `gorm:"not_null"`           // 样例内容
 }
 
 type logTemplateSlice []*logTemplate
@@ -51,8 +51,9 @@ type logParser struct {
 
 	templateMiner *template_miner.TemplateMiner
 
-	resultBuffer logTemplateSlice // 结果缓冲池
-	bufferMap    map[uint32]*logTemplate
+	resultBuffer logTemplateSlice        // 结果缓冲池
+	bufferMap    map[uint32]*logTemplate // 判断是否存在
+	bufferLock   sync.Mutex
 
 	saveResultDuration time.Duration
 	saveResultDone     chan<- struct{} // 用于关闭导出结果的ticker
@@ -60,7 +61,7 @@ type logParser struct {
 	mysqlCfg *mysqlCfg
 	db       *gorm.DB
 
-	runnable sync.RWMutex // 互斥重载配置，导出结果与处理日志三种操作
+	runnable sync.RWMutex // 互斥重载配置与处理日志操作
 }
 
 type kafkaCfg struct {
@@ -105,11 +106,12 @@ func New(configPath string) (*logParser, error) {
 		log.Error(errors.WithMessage(err, "load state failed"))
 	}
 
-	// 模拟析构函数 关闭ticker 防止内存泄漏
+	// 模拟析构函数
 	runtime.SetFinalizer(logParser, logParserDestructor)
 	return logParser, nil
 }
 
+// 从配置文件读取配置
 func (l *logParser) initConfig(configPath string) (*viper.Viper, error) {
 	log.Info("init log parser config")
 	cfg := viper.New()
@@ -119,6 +121,7 @@ func (l *logParser) initConfig(configPath string) (*viper.Viper, error) {
 		return nil, err
 	}
 
+	// 配置文件变化时自动重载
 	cfg.WatchConfig()
 	cfg.OnConfigChange(func(e fsnotify.Event) {
 		if err := l.reloadFromConfig(cfg); err != nil {
@@ -129,60 +132,10 @@ func (l *logParser) initConfig(configPath string) (*viper.Viper, error) {
 	return cfg, nil
 }
 
-func (l *logParser) ProcessLogMessage(msg []byte) {
-	logMessage := new(logTemplate)
-	if err := jsoniter.Unmarshal(msg, logMessage); err != nil {
-		log.Error("unmarshal message failed", err)
-		return
-	}
-
-	logMessage.Size = 1
-
-	l.runnable.RLock()
-	defer l.runnable.RUnlock()
-
-	cluster, level := l.templateMiner.ProcessLogMessage(logMessage.Content, logMessage.Level)
-	logMessage.ClusterId = cluster.ID
-	logMessage.Tokens = strings.Join(cluster.Tokens, " ")
-	logMessage.Level = level
-
-	l.saveToBuffer(logMessage)
-	l.sendRealtimeResult(logMessage)
-}
-
-func (l *logParser) Close() error {
-	l.closeCron()
-	if err := l.consumer.Close(); err != nil {
-		return errors.WithMessage(err, "close consumer failed")
-	}
-	if err := l.producer.Close(); err != nil {
-		return errors.WithMessage(err, "close producer failed")
-	}
-
-	if mysqldb, err := l.db.DB(); err != nil {
-		return errors.WithMessage(err, "get mysql db failed")
-	} else if err = mysqldb.Close(); err != nil {
-		return errors.WithMessage(err, "close db failed")
-	}
-	return nil
-}
-
-// 模拟析构函数 关闭ticker 防止内存泄漏
-func logParserDestructor(l *logParser) {
-	if err := l.Close(); err != nil {
-		log.Error(err)
-	}
-}
-
-func (l *logParser) closeCron() {
-	if l.saveResultDone != nil {
-		close(l.saveResultDone)
-	}
-}
-
+// 根据配置文件重新初始化logParser
 func (l *logParser) reloadFromConfig(cfg *viper.Viper) (err error) {
 	log.Info("reload log parser")
-
+	// 停止run
 	l.runnable.Lock()
 	defer l.runnable.Unlock()
 
@@ -192,21 +145,21 @@ func (l *logParser) reloadFromConfig(cfg *viper.Viper) (err error) {
 		if err = l.templateMiner.ReloadFromConfig(cfg, defaultPersistenceHandlerFun); err != nil {
 			err = errors.WithMessage(err, "reload template miner failed")
 			log.Fatal(err)
-			panic(err)
 		}
 	} else if l.templateMiner, err = template_miner.New(cfg, defaultPersistenceHandlerFun); err != nil {
 		err = errors.WithMessage(err, "init template miner failed")
 		log.Fatal(err)
-		panic(err)
 	}
 
 	saveResultDuration := cfg.GetDuration("save_result_duration")
 	if saveResultDuration != l.saveResultDuration {
 		l.closeCron()
+		// 定时保存结果
 		l.saveResultDone = util.SetInterval(saveResultDuration, l.saveResult)
 		l.saveResultDuration = saveResultDuration
 	}
 
+	// retry函数设置选项
 	retryOpts := []retry.Option{
 		retry.Delay(time.Second),
 		retry.MaxJitter(time.Second),
@@ -221,18 +174,16 @@ func (l *logParser) reloadFromConfig(cfg *viper.Viper) (err error) {
 	if err != nil {
 		err = errors.WithMessage(err, "unmarshal kafka config failed")
 		log.Fatal(err)
-		panic(err)
 	}
+	// 配置文件中kafka部分发生变化
 	if !reflect.DeepEqual(l.kafkaCfg, kafkaCfg) {
 		l.kafkaCfg = &kafkaCfg
 		if err = retry.Do(l.initConsumer, retryOpts...); err != nil {
 			err = errors.WithMessage(err, "init kafka consumer failed")
 			log.Fatal(err)
-			panic(err)
 		} else if err = retry.Do(l.initProducer, retryOpts...); err != nil {
 			err = errors.WithMessage(err, "init kafka producer failed")
 			log.Fatal(err)
-			panic(err)
 		}
 	}
 
@@ -255,44 +206,17 @@ func (l *logParser) reloadFromConfig(cfg *viper.Viper) (err error) {
 	return
 }
 
-func (l *logParser) Run() {
-	log.Info("start running...")
-
-	ctx := context.Background()
-	start := time.Now()
-	for {
-		msg, err := l.consumer.ReadMessage(ctx)
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			continue
-		}
-
-		if len(msg.Value) == 0 {
-			break
-		}
-
-		// 延时重点在io, 不需要并发优化
-		l.ProcessLogMessage(msg.Value)
-	}
-
-	log.Info(time.Since(start))
-	log.Info("fuck")
-
-}
-
 func (l *logParser) initConsumer() error {
 	log.Info("init consumer")
 	r := kafka.NewReader(kafka.ReaderConfig{
 		Brokers:        l.kafkaCfg.Hosts,
-		//GroupID:        l.name,
+		GroupID:        l.name,
 		Topic:          l.kafkaCfg.InputTopic,
 		MinBytes:       l.kafkaCfg.ReadMinBytes,
 		MaxBytes:       l.kafkaCfg.ReadMaxBytes,
 		CommitInterval: l.kafkaCfg.CommitInterval,
-		StartOffset:    kafka.FirstOffset,
 	})
+	// 尝试fetch message, 不成功说明consumer初始化失败
 	if _, err := r.FetchMessage(context.Background()); err != nil {
 		return err
 	}
@@ -340,8 +264,9 @@ func (l *logParser) initDB() error {
 	if err != nil {
 		return errors.WithMessage(err, "open db failed")
 	}
+	// 指定表名 将数据结构迁移到数据库
 	if err = db.Table(mysqlCfg.TableName).AutoMigrate(&logTemplate{}); err != nil {
-		return errors.WithMessage(err, "init db table failed")
+		return errors.WithMessage(err, "migrate db table failed")
 	}
 
 	if l.db != nil {
@@ -356,8 +281,102 @@ func (l *logParser) initDB() error {
 	return nil
 }
 
+// 模拟析构函数
+func logParserDestructor(l *logParser) {
+	if err := l.Close(); err != nil {
+		log.Error(err)
+	}
+}
+
+func (l *logParser) Close() error {
+	// 关闭前保存剩余结果
+	_ = l.saveResult()
+
+	l.closeCron()
+	if err := l.consumer.Close(); err != nil {
+		return errors.WithMessage(err, "close consumer failed")
+	}
+	if err := l.producer.Close(); err != nil {
+		return errors.WithMessage(err, "close producer failed")
+	}
+
+	if mysqldb, err := l.db.DB(); err != nil {
+		return errors.WithMessage(err, "get mysql db failed")
+	} else if err = mysqldb.Close(); err != nil {
+		return errors.WithMessage(err, "close db failed")
+	}
+	return nil
+}
+
+// 关闭ticker 防止内存泄漏 见标准库中time.Ticker文档
+func (l *logParser) closeCron() {
+	if l.saveResultDone != nil {
+		close(l.saveResultDone)
+	}
+}
+
+func (l *logParser) Run() {
+	log.Info("start running...")
+
+	var wg sync.WaitGroup
+	ctx := context.Background()
+	// del
+	start := time.Now()
+	for {
+		msg, err := l.consumer.ReadMessage(ctx)
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			log.Errorf("read message form kafka failed, err: %v", err)
+			continue
+		}
+
+		// del
+		if len(msg.Value) == 0 {
+			break
+		}
+
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			l.ProcessLogMessage(msg.Value)
+		}()
+	}
+
+	// del
+	wg.Wait()
+	_ = l.saveResult()
+	log.Info(time.Since(start))
+}
+
+func (l *logParser) ProcessLogMessage(msg []byte) {
+	logMessage := new(logTemplate)
+	if err := jsoniter.Unmarshal(msg, logMessage); err != nil {
+		log.Error("unmarshal message failed", err)
+		return
+	}
+
+	logMessage.Size = 1
+
+	// 防止此时重载配置
+	l.runnable.RLock()
+	defer l.runnable.RUnlock()
+
+	cluster, level := l.templateMiner.ProcessLogMessage(logMessage.Content, logMessage.Level)
+	logMessage.ClusterId = cluster.ID
+	logMessage.Tokens = strings.Join(cluster.Tokens, " ")
+	logMessage.Level = level // 归一化level
+
+	l.saveToBuffer(logMessage)
+	l.sendRealtimeResult(logMessage)
+}
+
 func (l *logParser) saveToBuffer(msg *logTemplate) {
 	id := msg.ClusterId
+	l.bufferLock.Lock()
+	defer l.bufferLock.Unlock()
+
 	if result, found := l.bufferMap[id]; found {
 		result.Size++
 		result.Tokens = msg.Tokens
@@ -369,9 +388,10 @@ func (l *logParser) saveToBuffer(msg *logTemplate) {
 	l.bufferMap[id] = msg
 }
 
+// 将结果保存到数据库
 func (l *logParser) saveResult() error {
-	l.runnable.Lock()
-	defer l.runnable.Unlock()
+	l.bufferLock.Lock()
+	defer l.bufferLock.Unlock()
 
 	if len(l.resultBuffer) == 0 {
 		log.Info("no recent result")
@@ -383,6 +403,7 @@ func (l *logParser) saveResult() error {
 		return errors.WithMessage(err, "save result to db failed")
 	}
 
+	// 清空buffer 但不重新分配内存
 	l.resultBuffer = l.resultBuffer[:0]
 	l.bufferMap = make(map[uint32]*logTemplate, len(l.bufferMap))
 	return nil
@@ -390,6 +411,7 @@ func (l *logParser) saveResult() error {
 
 func (l *logParser) sendRealtimeResult(template *logTemplate) {
 	buf := bytes.NewBuffer([]byte{})
+	// 防止转义字符
 	enc := jsoniter.NewEncoder(buf)
 	enc.SetEscapeHTML(false)
 
@@ -417,23 +439,29 @@ func (l *logParser) saveToDB() (err error) {
 	}
 
 	var oldResults logTemplateSlice
+	// 指定表名
 	db := l.db.Table(l.mysqlCfg.TableName)
+	// 显式使用事务
 	tx := db.Begin()
 	defer tx.Commit()
+	// 获取数据库中的模板数据
 	err = tx.Where("cluster_id in ?", clusterIds).Find(&oldResults).Error
 	if err != nil {
 		return
 	}
 
+	// 更新现有数据的Size
 	for _, oldTemplate := range oldResults {
 		if template, found := l.bufferMap[oldTemplate.ClusterId]; found {
 			template.Size += oldTemplate.Size
 		}
 	}
 
+	// Upsert 插入或更新，当cluster_id有冲突时更新指定列
 	err = tx.Clauses(
 		clause.OnConflict{
-			UpdateAll: true,
+			Columns:   []clause.Column{{Name: "cluster_id"}},
+			DoUpdates: clause.AssignmentColumns([]string{"tokens", "content", "size", "updated_at"}),
 		},
 	).Create(&l.resultBuffer).Error
 	return
