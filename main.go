@@ -5,7 +5,7 @@ import (
 	"test/log_parser"
 )
 
-const configPath = "log_parser.yml"
+const configPath = "config.yml"
 
 func main() {
 	logParser, _ := log_parser.New(configPath)

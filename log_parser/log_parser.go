@@ -215,6 +215,7 @@ func (l *logParser) initConsumer() error {
 		MinBytes:       l.kafkaCfg.ReadMinBytes,
 		MaxBytes:       l.kafkaCfg.ReadMaxBytes,
 		CommitInterval: l.kafkaCfg.CommitInterval,
+		StartOffset:    kafka.LastOffset,
 	})
 	// 尝试fetch message, 不成功说明consumer初始化失败
 	if _, err := r.FetchMessage(context.Background()); err != nil {
@@ -445,7 +446,7 @@ func (l *logParser) saveToDB() (err error) {
 	tx := db.Begin()
 	defer tx.Commit()
 	// 获取数据库中的模板数据
-	err = tx.Where("cluster_id in ?", clusterIds).Find(&oldResults).Error
+	err = tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("cluster_id in ?", clusterIds).Find(&oldResults).Error
 	if err != nil {
 		return
 	}

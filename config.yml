@@ -1,4 +1,4 @@
-name: hadoopaaaSAaahaaqaaaaaaaaaa
+name: hadoop
 levels: # 输入日志的级别范围
   - default
   - info
@@ -21,7 +21,7 @@ masking: '[
 
 kafka:
   hosts:
-    - 192.168.1.109:9092
+    - 192.168.1.103:9092
   input_topic: hadoop_log_input
   output_topic: hadoop_log_output
   read_min_bytes: 10e3 # 10kb
@@ -39,5 +39,5 @@ mysql:
   password: 'k!2a7Lrn3'
   table-name: 'hadoop_log_templates'
 
-save_result_duration: 50ms # 保存结果的duration
+save_result_duration: 1s # 保存结果的duration
 
