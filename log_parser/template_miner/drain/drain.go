@@ -13,7 +13,7 @@ const paramStr = "<*>"
 type LogCluster struct {
 	Tokens []string
 	ID     uint32
-	Size   int64
+	Size   uint64
 }
 
 func newLogCluster(tokens []string) *LogCluster {
@@ -40,7 +40,6 @@ func (c *LogCluster) attachNewLog(tokens []string) {
 			c.Tokens[i] = paramStr
 		}
 	}
-
 	c.Size++
 }
 

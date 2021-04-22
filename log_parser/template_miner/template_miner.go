@@ -3,8 +3,8 @@ package template_miner
 import (
 	"bufio"
 	"bytes"
-	"compress/gzip"
 	jsoniter "github.com/json-iterator/go"
+	"github.com/pierrec/lz4"
 	"github.com/pkg/errors"
 	"github.com/prometheus/common/log"
 	"github.com/spf13/viper"
@@ -130,7 +130,7 @@ func (t *TemplateMiner) ProcessLogMessage(content, level string) (*drain.LogClus
 	}
 	drain := t.levelDrains[level]
 
-	//  t.masker.Mask占用90%以上的耗时，drain算法无需并发处理
+	//  t.masker.Mask占用90%以上的耗时，其实无需并发处理
 	t.lock.Lock()
 	defer t.lock.Unlock()
 
@@ -157,7 +157,7 @@ func (t *TemplateMiner) SaveState() error {
 		compressedStateBuf := bytebufferpool.Get()
 		defer bytebufferpool.Put(compressedStateBuf)
 
-		w := gzip.NewWriter(compressedStateBuf)
+		w := lz4.NewWriter(compressedStateBuf)
 		_, err := buf.WriteTo(w)
 		if err != nil {
 			return errors.WithMessage(err, "gzip state failed")
@@ -189,12 +189,7 @@ func (t *TemplateMiner) LoadState() error {
 
 	// gzip解压
 	if t.compressState {
-		r, err := gzip.NewReader(bytes.NewReader(state))
-		if err != nil {
-			return errors.WithMessage(err, "create gzip reader failed")
-		}
-		defer r.Close()
-
+		r := lz4.NewReader(bytes.NewReader(state))
 		uncompressedState := bytebufferpool.Get()
 		defer bytebufferpool.Put(uncompressedState)
 

@@ -151,14 +151,6 @@ func (l *logParser) reloadFromConfig(cfg *viper.Viper) (err error) {
 		log.Fatal(err)
 	}
 
-	saveResultDuration := cfg.GetDuration("save_result_duration")
-	if saveResultDuration != l.saveResultDuration {
-		l.closeCron()
-		// 定时保存结果
-		l.saveResultDone = util.SetInterval(saveResultDuration, l.saveResult)
-		l.saveResultDuration = saveResultDuration
-	}
-
 	// retry函数设置选项
 	retryOpts := []retry.Option{
 		retry.Delay(time.Second),
@@ -203,6 +195,14 @@ func (l *logParser) reloadFromConfig(cfg *viper.Viper) (err error) {
 		}
 	}
 
+	saveResultDuration := cfg.GetDuration("save_result_duration")
+	if saveResultDuration != l.saveResultDuration {
+		l.closeCron()
+		// 定时保存结果
+		l.saveResultDone = util.SetInterval(saveResultDuration, l.saveResult)
+		l.saveResultDuration = saveResultDuration
+	}
+
 	return
 }
 
@@ -215,7 +215,8 @@ func (l *logParser) initConsumer() error {
 		MinBytes:       l.kafkaCfg.ReadMinBytes,
 		MaxBytes:       l.kafkaCfg.ReadMaxBytes,
 		CommitInterval: l.kafkaCfg.CommitInterval,
-		StartOffset:    kafka.LastOffset,
+		//StartOffset:    kafka.LastOffset,
+		StartOffset:    kafka.FirstOffset,
 	})
 	// 尝试fetch message, 不成功说明consumer初始化失败
 	if _, err := r.FetchMessage(context.Background()); err != nil {
@@ -322,8 +323,13 @@ func (l *logParser) Run() {
 	var wg sync.WaitGroup
 	ctx := context.Background()
 	// del
+	i := 0
 	start := time.Now()
 	for {
+		i++
+		if i>=180895 {
+			break
+		}
 		msg, err := l.consumer.ReadMessage(ctx)
 		if err == io.EOF {
 			break
