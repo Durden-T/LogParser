@@ -3,6 +3,13 @@ package log_parser
 import (
 	"bytes"
 	"context"
+	"io"
+	"reflect"
+	"runtime"
+	"strings"
+	"sync"
+	"time"
+
 	"github.com/avast/retry-go"
 	"github.com/fsnotify/fsnotify"
 	jsoniter "github.com/json-iterator/go"
@@ -13,14 +20,8 @@ import (
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
-	"io"
-	"reflect"
-	"runtime"
-	"strings"
-	"sync"
 	"test/log_parser/template_miner"
 	"test/util"
-	"time"
 )
 
 // const 默认持久化函数
