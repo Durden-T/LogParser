@@ -21,7 +21,7 @@ masking: '[
 
 kafka:
   hosts:
-    - 192.168.1.106:9092
+    - 10.128.241.194:9092
   input_topic: hadoop_log_input # 原始日志的输入topic
   output_topic: hadoop_log_output # 解析后的日志模板输出topic
   read_min_bytes: 10e3 # 10kb 每次最少读多少

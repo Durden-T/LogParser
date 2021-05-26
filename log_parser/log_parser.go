@@ -38,6 +38,8 @@ type logTemplate struct {
 
 	Level   string `gorm:"<-:create;not_null"` // 日志级别
 	Content string `gorm:"not_null"`           // 样例内容
+
+	Tag string
 }
 
 type logTemplateSlice []*logTemplate
@@ -217,7 +219,7 @@ func (l *logParser) initConsumer() error {
 		MaxBytes:       l.kafkaCfg.ReadMaxBytes,
 		CommitInterval: l.kafkaCfg.CommitInterval,
 		//StartOffset:    kafka.LastOffset,
-		StartOffset:    kafka.FirstOffset,
+		StartOffset: kafka.FirstOffset,
 	})
 	// 尝试fetch message, 不成功说明consumer初始化失败
 	if _, err := r.FetchMessage(context.Background()); err != nil {
@@ -328,7 +330,7 @@ func (l *logParser) Run() {
 	start := time.Now()
 	for {
 		i++
-		if i>=180895 {
+		if i >= 180895 {
 			break
 		}
 		msg, err := l.consumer.ReadMessage(ctx)
